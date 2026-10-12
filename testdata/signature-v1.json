@@ -1,0 +1,10 @@
+{
+  "data": {
+    "algorithm": "ed25519",
+    "pdf_sha256": "df10afcf3114441672074f8b91151648033d60b0a8082fac7c518cab736445b5",
+    "public_key_id": "484e1ab69e5aa3743e4ca1a0e41c2a2fe9c5a927d51fd792325302d4d3061083",
+    "retain_until": "0001-01-01T00:00:00Z",
+    "signed_at": "2026-10-12T09:30:00.123456Z",
+    "value": "PwqcdfGwBQeCz6wQ/+nFLoqfm3fHFjaKQ9GJ68Dzaom61k4TJyC/IyRXyCsvdV1TlbOu4GLTr5hlKuOyg+mOAQ=="
+  }
+}
