@@ -1,0 +1,20 @@
+{
+  "data": {
+    "algorithm": "ed25519-v3",
+    "pdf_sha256": "df10afcf3114441672074f8b91151648033d60b0a8082fac7c518cab736445b5",
+    "public_key_id": "484e1ab69e5aa3743e4ca1a0e41c2a2fe9c5a927d51fd792325302d4d3061083",
+    "recovery": {
+      "rto_seconds": 754,
+      "rpo_seconds": 93600,
+      "backup_at": "2026-10-11T07:30:00.123456Z",
+      "backup_at_source": "s3_last_modified",
+      "fetch_ms": 41200,
+      "restore_ms": 712900,
+      "rto_target_seconds": 3600,
+      "rpo_target_seconds": 86400
+    },
+    "retain_until": "2033-10-12T09:30:00.123456Z",
+    "signed_at": "2026-10-12T09:30:00.123456Z",
+    "value": "Ke+5NekCKRlbIuHoHS230VUIk7xNN+acKvA8PV9Yisl/TX/ZY62Ln/WCzCXdTH676hHQEgpquLEuH5vTqd7YDA=="
+  }
+}

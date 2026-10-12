@@ -9,7 +9,9 @@ checks three things:
 1. **The PDF is unaltered.** Its SHA-256 must match the signed digest.
 2. **The signature is genuine.** It must verify under the published key it names.
 3. **The signed details are unaltered.** For v2 signatures that includes the
-   signing time and the retention date.
+   signing time and the retention date. For v3 it also includes the measured
+   recovery metrics: RTO, RPO, backup time and its source, fetch and restore
+   times, and the targets in force.
 
 It is one Go file using only the standard library, so you can read all of it
 before you run it.
@@ -56,6 +58,7 @@ dokaz-verify --pdf=evidence.pdf --sig=signature.json --pubkey=evidence-signing-k
 |---|---|
 | `ed25519` (v1) | `hex(sha256(pdf)) + "\|" + signed_at` |
 | `ed25519-v2` | `"dokaz-evidence-v2\npdf_sha256=" + hex + "\nsigned_at=" + signed_at + "\nretain_until=" + retain_until` |
+| `ed25519-v3` | as v2 but prefixed `dokaz-evidence-v3`, then `"\nrto_seconds=" … "\nrpo_seconds=" … "\nbackup_at=" … "\nbackup_at_source=" … "\nfetch_ms=" … "\nrestore_ms=" … "\nrto_target_seconds=" … "\nrpo_target_seconds=" …` from the signatures `recovery` object (null = empty value) |
 
 Timestamps are RFC 3339 with nanoseconds, in UTC.
 

@@ -27,6 +27,13 @@
 //	ed25519     (v1) hex(sha256(pdf)) "|" signed_at
 //	ed25519-v2  (v2) "dokaz-evidence-v2\npdf_sha256=" hex "\nsigned_at=" signed_at
 //	                 "\nretain_until=" retain_until      (also binds retention)
+//	ed25519-v3  (v3) "dokaz-evidence-v3\npdf_sha256=" hex "\nsigned_at=" signed_at
+//	                 "\nretain_until=" retain_until
+//	                 "\nrto_seconds=" … "\nrpo_seconds=" … "\nbackup_at=" …
+//	                 "\nbackup_at_source=" … "\nfetch_ms=" … "\nrestore_ms=" …
+//	                 "\nrto_target_seconds=" … "\nrpo_target_seconds=" …
+//	                 (also binds the measured recovery metrics: the
+//	                 signature JSON's "recovery" object; null = empty value)
 //
 // Timestamps are RFC 3339 with nanoseconds, in UTC.
 //
@@ -35,6 +42,9 @@
 //	0   signature is valid
 //	1   signature is invalid (algorithm, digest, key, or Ed25519 check fails)
 //	2   bad input (file missing, malformed JSON, no usable key, etc.)
+//
+// Mirrored verbatim to github.com/TheArtificialArchitect/dokaz-verify, where
+// releases are built: change both together.
 package main
 
 import (
@@ -50,12 +60,25 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // version is set at release build time (-ldflags "-X main.version=...").
 var version = "dev"
+
+// buildVersion is the release tag, or for `go install …@vX` builds the module
+// version recorded in the binary.
+func buildVersion() string {
+	if version == "dev" {
+		if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			return bi.Main.Version
+		}
+	}
+	return version
+}
 
 // KeysURL is where Dokaz publishes its evidence-signing public keys.
 const KeysURL = "https://dokaz.net/.well-known/evidence-signing-keys.pem"
@@ -70,6 +93,63 @@ type signature struct {
 	PDFSHA256   string    `json:"pdf_sha256"`
 	SignedAt    time.Time `json:"signed_at"`
 	RetainUntil time.Time `json:"retain_until"`
+	// Recovery is the measured recovery-metrics block, signed by v3.
+	Recovery *recovery `json:"recovery"`
+}
+
+// recovery is the "recovery" object of a v3 signature: RTO = fetch +
+// restore wall-clock; RPO = drill start - backup_at (backup_at_source says
+// where the backup time came from); the targets in force at drill start.
+type recovery struct {
+	RTOSeconds       *int64     `json:"rto_seconds"`
+	RPOSeconds       *int64     `json:"rpo_seconds"`
+	BackupAt         *time.Time `json:"backup_at"`
+	BackupAtSource   *string    `json:"backup_at_source"`
+	FetchMS          *int64     `json:"fetch_ms"`
+	RestoreMS        *int64     `json:"restore_ms"`
+	RTOTargetSeconds *int64     `json:"rto_target_seconds"`
+	RPOTargetSeconds *int64     `json:"rpo_target_seconds"`
+}
+
+// canonical mirrors internal/evidence Recovery.canonical exactly.
+func (r recovery) canonical() string {
+	num := func(v *int64) string {
+		if v == nil {
+			return ""
+		}
+		return strconv.FormatInt(*v, 10)
+	}
+	backupAt, source := "", ""
+	if r.BackupAt != nil {
+		backupAt = r.BackupAt.UTC().Format(time.RFC3339Nano)
+	}
+	if r.BackupAtSource != nil {
+		source = *r.BackupAtSource
+	}
+	return "\nrto_seconds=" + num(r.RTOSeconds) +
+		"\nrpo_seconds=" + num(r.RPOSeconds) +
+		"\nbackup_at=" + backupAt +
+		"\nbackup_at_source=" + source +
+		"\nfetch_ms=" + num(r.FetchMS) +
+		"\nrestore_ms=" + num(r.RestoreMS) +
+		"\nrto_target_seconds=" + num(r.RTOTargetSeconds) +
+		"\nrpo_target_seconds=" + num(r.RPOTargetSeconds)
+}
+
+// summary is the one-line human rendering printed after OK.
+func (r recovery) summary() string {
+	num := func(v *int64, unit string) string {
+		if v == nil {
+			return "-"
+		}
+		return strconv.FormatInt(*v, 10) + unit
+	}
+	src := "-"
+	if r.BackupAtSource != nil {
+		src = *r.BackupAtSource
+	}
+	return "rto=" + num(r.RTOSeconds, "s") + " (target " + num(r.RTOTargetSeconds, "s") + ")" +
+		"  rpo=" + num(r.RPOSeconds, "s") + " (target " + num(r.RPOTargetSeconds, "s") + ", backup_at_source=" + src + ")"
 }
 
 // envelope mirrors the Dokaz API response wrapper { data: ..., meta: ..., errors: ... }
@@ -94,7 +174,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *showVersion {
-		fmt.Fprintln(stdout, "dokaz-verify "+version)
+		fmt.Fprintln(stdout, "dokaz-verify "+buildVersion())
 		return 0
 	}
 	if *pdfPath == "" || *sigPath == "" || *pubPath == "" {
@@ -151,6 +231,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "OK  key=%s  alg=%s  signed_at=%s  %s\n",
 		sig.PublicKeyID, sig.Algorithm, sig.SignedAt.UTC().Format(time.RFC3339), retention)
+	if sig.Algorithm == "ed25519-v3" && sig.Recovery != nil {
+		fmt.Fprintf(stdout, "    recovery (signed): %s\n", sig.Recovery.summary())
+	}
 	return 0
 }
 
@@ -216,6 +299,14 @@ func verify(pub ed25519.PublicKey, pdf []byte, sig signature) error {
 		msg = []byte("dokaz-evidence-v2\npdf_sha256=" + hexDigest +
 			"\nsigned_at=" + sig.SignedAt.UTC().Format(time.RFC3339Nano) +
 			"\nretain_until=" + sig.RetainUntil.UTC().Format(time.RFC3339Nano))
+	case "ed25519-v3": // v3 — identical to internal/evidence signedMessageV3
+		if sig.Recovery == nil {
+			return errors.New(`ed25519-v3 signature JSON has no "recovery" object`)
+		}
+		msg = []byte("dokaz-evidence-v3\npdf_sha256=" + hexDigest +
+			"\nsigned_at=" + sig.SignedAt.UTC().Format(time.RFC3339Nano) +
+			"\nretain_until=" + sig.RetainUntil.UTC().Format(time.RFC3339Nano) +
+			sig.Recovery.canonical())
 	default:
 		return fmt.Errorf("unsupported algorithm %q", sig.Algorithm)
 	}

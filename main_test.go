@@ -54,6 +54,8 @@ func TestVectorsVerify(t *testing.T) {
 		{"signature-v1.json", "alg=ed25519 "},
 		{"signature-v2.json", "alg=ed25519-v2"},        // retired key: second PEM block
 		{"signature-v2-active.json", "alg=ed25519-v2"}, // active key: first PEM block
+		{"signature-v3.json", "alg=ed25519-v3"},        // + signed recovery metrics
+		{"signature-v3-sparse.json", "alg=ed25519-v3"}, // nulls sign as empty values
 	} {
 		code, out := runCLI(t, td("evidence.pdf"), td(tc.sig), td("keys.pem"))
 		if code != 0 || !strings.HasPrefix(out, "OK") || !strings.Contains(out, tc.alg) {
@@ -143,5 +145,38 @@ func TestProductionEvidence(t *testing.T) {
 	code, out := runCLI(t, filepath.Join(dir, "evidence.pdf"), filepath.Join(dir, "signature.json"), filepath.Join(dir, "keys.pem"))
 	if code != 0 || !strings.Contains(out, "key=e384c161032c3d57cd46925d67a84300618acaae9581b5be58fcbf714ce91177") {
 		t.Fatalf("production evidence must verify under the published key: code=%d out=%s", code, out)
+	}
+}
+
+func TestV3PrintsSignedRecovery(t *testing.T) {
+	_, out := runCLI(t, td("evidence.pdf"), td("signature-v3.json"), td("keys.pem"))
+	if !strings.Contains(out, "recovery (signed): rto=754s (target 3600s)") {
+		t.Fatalf("v3 output must show the signed recovery metrics: %s", out)
+	}
+}
+
+// Editing any recovery figure, or nulling one, must break a v3 signature.
+func TestV3RejectsAlteredRecovery(t *testing.T) {
+	for field, value := range map[string]any{
+		"rto_seconds": 600, "rpo_seconds": nil, "rto_target_seconds": 7200,
+		"backup_at": "2026-10-12T07:30:00.123456Z", "backup_at_source": "declared",
+	} {
+		raw, _ := os.ReadFile(td("signature-v3.json"))
+		var env map[string]map[string]any
+		_ = json.Unmarshal(raw, &env)
+		env["data"]["recovery"].(map[string]any)[field] = value
+		b, _ := json.Marshal(env)
+		path := filepath.Join(t.TempDir(), "sig.json")
+		_ = os.WriteFile(path, b, 0o600)
+		if code, out := runCLI(t, td("evidence.pdf"), path, td("keys.pem")); code != 1 {
+			t.Errorf("altered recovery.%s must fail: code=%d out=%s", field, code, out)
+		}
+	}
+}
+
+func TestV3RequiresRecoveryObject(t *testing.T) {
+	sig := mutated(t, "signature-v3.json", "recovery", nil)
+	if code, out := runCLI(t, td("evidence.pdf"), sig, td("keys.pem")); code != 1 {
+		t.Fatalf("v3 without recovery must fail: code=%d out=%s", code, out)
 	}
 }
