@@ -52,6 +52,28 @@ dokaz-verify --pdf=evidence.pdf --sig=signature.json --pubkey=evidence-signing-k
 | 1 | `FAIL`: tampered PDF, altered field, unknown key, or bad signature |
 | 2 | Bad input |
 
+## Check the public transparency log (`--log`)
+
+Dokaz appends every evidence signature to a public, append-only
+[RFC 6962](https://www.rfc-editor.org/rfc/rfc6962) Merkle log, served at
+<https://dokaz.net/log/checkpoint>. Once a signed checkpoint covers a report,
+its signature JSON carries a `log` object: the leaf, an inclusion proof and
+the checkpoint (a [C2SP signed note](https://c2sp.org/tlog-checkpoint) under
+the key name `dokaz.net/log`).
+
+```sh
+dokaz-verify --log --sig=signature.json --pubkey=evidence-signing-keys.pem --pdf=evidence.pdf
+```
+
+This checks four things: the checkpoint is signed by a published key, the
+leaf hashes into the checkpoint's root, the leaf names this exact signature
+and PDF, and the evidence signature itself. A signature without an anchor
+yet (`"log": null`, checkpoints are cut every few minutes) exits 2.
+
+A log entry holds only hashes, the key fingerprint and the signing time.
+It never holds customer names or identifiers. The checkpoint timestamp is
+Dokaz's own clock; independent witnesses are planned.
+
 ## Signature formats
 
 | `algorithm` | Signed message |
